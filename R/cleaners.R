@@ -1,5 +1,13 @@
+library(QuantTools)
 download <- function(syms){
         system(paste0("python ~/mods/stocks_daily.py --list ", paste(syms, collapse=" ")))
+}
+download1 <- function(syms){
+        from <- "2000-01-01"
+        to <- "2028-12-15"
+        data <- get_yahoo_data( syms, from, to )
+        write.csv(data,paste0("~/mods/stocks/",syms,".csv"),row.names=F)
+        #system(paste0("python ~/mods/stocks_daily.py --list ", paste(syms, collapse=" ")))
 }
 
 download2 <- function(syms){
@@ -131,11 +139,13 @@ get_earnings <- function(df,f){
 
 clean_standard_daily_rand <- function(name){
     tryCatch({ stock <- read.csv(paste("~/mods/stocks/",name, ".csv", sep=""), header = FALSE, nrows=1)}, error = function(e){ 
-		(system(paste0("python ~/mods/stocks_daily.py --list ", name)))
-		})
+		#(system(paste0("python ~/mods/stocks_daily.py --list ", name)))
+		download(name)
+        })
     stock <- read.csv(paste("~/mods/stocks/",name, ".csv", sep=""), header=FALSE)
-    stock$V8 <- NULL
-    stock$V7 <- NULL
+    stock$adj_close <- NULL
+    stock[,8] <- NULL
+    stock[,7] <- NULL
     colnames(stock) <- c("time", "high", "low", "open", "close", "volume")
     stock$open <- rnorm(n=nrow(stock), mean=20, sd=0.1)
     stock$close <- stock$open+rnorm(n=nrow(stock), mean=0, sd=0.1)
@@ -143,6 +153,8 @@ clean_standard_daily_rand <- function(name){
     stock$low <- rnorm(n=nrow(stock), mean=20, sd=0.1)
     stock$change <- stock$close/stock$open
     stock$range <- stock$high/stock$low
+    stock <- get_data_prev(stock, "close", 1)
+    stock$op <- stock$open/stock$close_prev_1
     stock <- split_time(stock)
     stock$time <- NULL
     #stock <- get_earnings(stock,name)
@@ -150,22 +162,78 @@ clean_standard_daily_rand <- function(name){
     
 }
 
-clean_standard_daily <- function(name){
+clean_standard_daily <- function(name,download_file=T){
+    options(warn=-1)
     name <- toupper(name)
+    stock <- data.frame()
+    tryCatch({
     f <- paste("~/mods/stocks/",name, ".csv", sep="")
     if(!file.exists(f)){
-	download(name)
+	    if(download_file)
+            download(name)
     } else if(as.POSIXlt.POSIXct(Sys.time()-86400) > file.info(f)$mtime){	
-	download(name)
+	    if(download_file)
+            download(name)
     }
-    stock <- read.csv(f, header=FALSE)
-    stock$V8 <- NULL
-    stock$V7 <- NULL
-    colnames(stock) <- c("time", "high", "low", "open", "close", "volume")
+    stock <- read.csv(f, header=F)
+    stock[,8] <- NULL
+    stock[,7] <- NULL
+    colnames(stock) <- c("date", "high", "low", "open", "close", "volume")
     stock$change <- stock$close/stock$open
     stock$range <- stock$high/stock$low
+    stock <- get_data_prev(stock, "close", 1)
+    stock$op <- stock$open/stock$close_prev_1
+    if(is.na(stock$change[nrow(stock)-2])){
+        stop("ss")
+    }
     stock <- split_time(stock)
     stock$time <- NULL
+    #return(stock)
+    }, error=function(e){
+    f <- paste("~/mods/stocks/",name, ".csv", sep="")
+    download1(name)
+    stock <- read.csv(f, header=T)
+    stock$adj_close <- NULL
+    stock[,8] <- NULL
+    stock[,7] <- NULL
+    stock$high <- as.numeric(as.character(stock$high))
+    stock$close <- as.numeric(as.character(stock$close))
+    stock$low <- as.numeric(as.character(stock$low))
+    stock$open <- as.numeric(as.character(stock$open))
+    stock$volume <- as.numeric(as.character(stock$volume))
+    stock$date <- as.character(stock$date)
+    stock$change <- stock$close/stock$open
+    stock$range <- stock$high/stock$low
+    stock <- get_data_prev(stock, "close", 1)
+    stock$op <- stock$open/stock$close_prev_1
+    stock <<- stock
+    })
+    options(warn=0)
+    return(stock)
+}
+
+clean_standard_daily2 <- function(name,download_file=T){
+    #options(warn=-1)
+    name <- toupper(name)
+    stock <- data.frame()
+    f <- paste("~/mods/stocks/",name, ".csv", sep="")
+    download1(name)
+    stock <- read.csv(f, header=T)
+    stock$adj_close <- NULL
+    stock[,8] <- NULL
+    stock[,7] <- NULL
+    stock$high <- as.numeric(as.character(stock$high))
+    stock$close <- as.numeric(as.character(stock$close))
+    stock$low <- as.numeric(as.character(stock$low))
+    stock$open <- as.numeric(as.character(stock$open))
+    stock$volume <- as.numeric(as.character(stock$volume))
+    stock$date <- as.character(stock$date)
+    stock$change <- stock$close/stock$open
+    stock$range <- stock$high/stock$low
+    stock <- get_data_prev(stock, "close", 1)
+    stock$op <- stock$open/stock$close_prev_1
+    #stock <<- stock
+    #options(warn=0)
     return(stock)
 }
 
@@ -191,25 +259,21 @@ clean_earnings <- function(sym){
 	tryCatch({
 		    name <- toupper(sym)
 		    f <- paste("~/mods/earnings/db/",name, ".csv", sep="")
-		  #  if(!file.exists(f)){
-			#download_earnings(name)
-		  #  } else if(as.POSIXlt.POSIXct(Sys.time()-86400) > file.info(f)$mtime){	
-			#download_earnings(name)
-		  #  }
-		  #if("Acutal.EPS" %in% colnames(df2))
-		  #  v <- df2$Actual.EPS
-		  #else
-		  #v <- df2$Reported.EPS
+		    if(!file.exists(f)){
+			download_earnings(name)
+		    } else if(as.POSIXlt.POSIXct(Sys.time()-86400) > file.info(f)$mtime){	
+			download_earnings(name)
+		    }
 		df2 <- read.csv(f,stringsAsFactors=F)
 		df2 <- df2[2:nrow(df2),]
-		#df2$Reported.EPS <- gsub("\\)","",gsub("\\(\\$","\\$-",v))
-		#df2$Consensus.Estimate <- gsub("\\)","",gsub("\\(\\$","\\$-",df2$Consensus.Estimate))
-		#df2$EPS <- as.numeric(substr(df2$Reported.EPS,2,nchar(df2$Reported.EPS)))
-		#df2$Con_EPS <- as.numeric(substr(df2$Consensus.Estimate,2,nchar(df2$Consensus.Estimate)))
-		#df2$Rev <- unlist(lapply(strsplit((substr(df2$Actual.Revenue,2,nchar(df2$Actual.Revenue)))," "),earnings_helper))
-		#df2$Con_Rev <- unlist(lapply(strsplit((substr(df2$Revenue.Estimate,2,nchar(df2$Revenue.Estimate)))," "),earnings_helper))
+		df2$Reported.EPS <- gsub("\\)","",gsub("\\(\\$","\\$-",df2$Reported.EPS))
+		df2$Consensus.Estimate <- gsub("\\)","",gsub("\\(\\$","\\$-",df2$Consensus.Estimate))
+		df2$EPS <- as.numeric(substr(df2$Reported.EPS,2,nchar(df2$Reported.EPS)))
+		df2$Con_EPS <- as.numeric(substr(df2$Consensus.Estimate,2,nchar(df2$Consensus.Estimate)))
+		df2$Rev <- unlist(lapply(strsplit((substr(df2$Actual.Revenue,2,nchar(df2$Actual.Revenue)))," "),earnings_helper))
+		df2$Con_Rev <- unlist(lapply(strsplit((substr(df2$Revenue.Estimate,2,nchar(df2$Revenue.Estimate)))," "),earnings_helper))
 		df2$date <- as.character(as.Date(df2$Date,"%m/%d/%Y"))
-		return(df2[,c("date")])												
+		return(df2[,c("EPS","Con_EPS","Rev","Con_Rev","date")])												
 	},error=function(e){return(data.frame())})
 }
 
@@ -270,14 +334,14 @@ bind_earnings <- function(stock,earnings){
 	stock <- stock[order(stock$date),]
 	earnings <- earnings[order(earnings$date),]
 	stock$earnings_date <- as.numeric(stock$date %in% earnings$date)
-	#stock$eps <- 0
-	#stock$con_eps <- 0
-	#stock$con_rev <- 0
-	#stock$rev <- 0
-  #stock$eps[stock$earnings_date==1] <- earnings$EPS
-	#stock$con_eps[stock$earnings_date==1] <- earnings$Con_EPS
-	#stock$con_rev[stock$earnings_date==1] <- earnings$Con_Rev
-	#stock$rev[stock$earnings_date==1] <- earnings$Rev
+	stock$eps <- 0
+	stock$con_eps <- 0
+	stock$con_rev <- 0
+	stock$rev <- 0
+    stock$eps[stock$earnings_date==1] <- earnings$EPS
+	stock$con_eps[stock$earnings_date==1] <- earnings$Con_EPS
+	stock$con_rev[stock$earnings_date==1] <- earnings$Con_Rev
+	stock$rev[stock$earnings_date==1] <- earnings$Rev
 	return(stock)
 }
 
@@ -287,12 +351,15 @@ bind_ud <- function(stock,ud_df){
 	ud_df$date <- as.character(ud_df$date)
 	stock <- stock[order(stock$date),]
 	ud_df <- ud_df[order(ud_df$date),]
-    ud_df$v2 <- ud_df$means/cummean(ud_df$means)
+    ud_df$v2 <- ud_df$means/EMA(ud_df$means,4)
 	stock$ud_date <- as.numeric(stock$date %in% ud_df$date)
 	stock$pt_mean <- 0
     ud_df$fm <- ud_df$Research.Firm
     stock$fm <- ""
     stock$fm[stock$ud_date==1] <- ud_df$fm[ud_df$sums==1 | (c(F,ud_df$sums[1:(nrow(ud_df)-1)]!=1 & ud_df$sums[2:(nrow(ud_df))]!= 1 & ud_df$sums[1:(nrow(ud_df)-1)]==ud_df$sums[2:(nrow(ud_df))]))]
+    ud_df$ac <- ud_df$Action
+    stock$ac <- ""
+    stock$ac[stock$ud_date==1] <- ud_df$ac[ud_df$sums==1 | (c(F,ud_df$sums[1:(nrow(ud_df)-1)]!=1 & ud_df$sums[2:(nrow(ud_df))]!= 1 & ud_df$sums[1:(nrow(ud_df)-1)]==ud_df$sums[2:(nrow(ud_df))]))]
 	ud_df <- ud_df[!duplicated(ud_df$date),]
 	stock$pt_mean[stock$ud_date==1] <- ud_df$means
 	stock$v2[stock$ud_date==1] <- ud_df$v2
@@ -590,5 +657,9 @@ dummy <- function(df, col){
 	}
 	df[,col] <- NULL
 	return(df)
+}
+
+kelly <- function(returns){
+     return((mean(returns)-1) /(mean(returns[returns > 1])-1 ))
 }
 
